@@ -1,0 +1,32 @@
+{% extends 'include/layout.html' %}
+{% block content %}
+
+<div class="container">
+  <h2 class="mb-4">Search Notecards</h2>
+  <form action="/notecardsearch" method="POST">
+    <div class="mb-3">
+      <label for="name" class="form-label">Notecard Name</label>
+      <input type="text" class="form-control" name="name" id="name" placeholder="Enter a name...">
+    </div>
+    <div class="mb-3">
+      <label for="type" class="form-label">Type</label>
+      <select name="type" class="form-select" id="type">
+        <option value="">-- Choose a type --</option>
+        <option value="character">Character</option>
+        <option value="monster">Monster</option>
+        <option value="npc">NPC</option>
+        <option value="location">Location</option>
+        <option value="spell">Spell</option> <!-- 🔥 ADD THIS -->
+      </select>
+    </div>
+    
+    <div class="mb-3">
+      <label for="tag" class="form-label">Tag (optional)</label>
+      <input type="text" class="form-control" name="tag" id="tag" placeholder="Enter a tag...">
+    </div>
+    
+    <button type="submit" class="btn btn-primary">Search</button>
+  </form>
+</div>
+
+{% endblock %}

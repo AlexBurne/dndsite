@@ -204,47 +204,69 @@ def edit_notecard(notecard_id):
     }
 
     extra = {}
-    spells = [] 
+    spells = []
+    all_spells = []
+    known_spells = []
 
     if card['type'] in ['character', 'monster', 'npc']:
         cursor.execute("""
-            SELECT race, level, class, strength, dexterity, constitution, intelligence, wisdom, charisma, id
+            SELECT race, level, class, strength, dexterity, constitution, intelligence,
+                wisdom, charisma, hp, speed, ac, id
             FROM entity
             WHERE note_id = %s
         """, (notecard_id,))
+
         entity = cursor.fetchone()
-        
-        if entity:
-            extra = dict(zip(
-                ['race', 'level', 'class', 'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'],
-                entity
-            ))
+
+        if not entity:
+            # Insert default entity with neutral stats (10s) to avoid future crashes
+            cursor.execute("""
+                INSERT INTO entity (note_id, race, level, class, strength, dexterity, constitution, intelligence, wisdom, charisma)
+                VALUES (%s, '', 1, '', 10, 10, 10, 10, 10, 10)
+            """, (notecard_id,))
+            mysql.connection.commit()
+            cursor.execute("""
+                SELECT race, level, class, strength, dexterity, constitution, intelligence, wisdom, charisma, id
+                FROM entity WHERE note_id = %s
+            """, (notecard_id,))
+            entity = cursor.fetchone()
+
+
+        # Now always safe to use
+        extra = dict(zip(
+            ['race', 'level', 'class', 'strength', 'dexterity', 'constitution',
+            'intelligence', 'wisdom', 'charisma', 'hp', 'speed', 'ac', 'id'],
+            entity
+        ))
+        entity_id = extra['id']
+
+
         # Load all spells and known spells
         cursor.execute("SELECT id, name FROM notecard WHERE type = 'spell' AND campaign_id = %s", (session['campaign_id'],))
         all_spells = cursor.fetchall()
         cursor.execute("SELECT spell_id FROM entity_spell WHERE entity_id = %s", (notecard_id,))
         known_spells = [row[0] for row in cursor.fetchall()]
-        all_spells = []
-        known_spells = []
-        # Fetch spell IDs associated with this entity
-        cursor.execute("""
-            SELECT spell_id
-            FROM entity_spell
-            WHERE entity_id = %s
-        """, (entity[9],))
-        associated_spell_ids = [row[0] for row in cursor.fetchall()]
-        print("Associated spell IDs:", associated_spell_ids)
+       # all_spells = []
+       # known_spells = []
+        associated_spell_ids = []
 
-        cursor = mysql.connection.cursor()
+        if entity:
+            entity_id = entity[9]  # entity[9] is only safe *after* checking
+            cursor.execute("""
+                SELECT spell_id
+                FROM entity_spell
+                WHERE entity_id = %s
+            """, (entity_id,))
+            associated_spell_ids = [row[0] for row in cursor.fetchall()]
+            print("Associated spell IDs:", associated_spell_ids)
+
         cursor.execute("""
             SELECT s.id, n.name
             FROM spells s
             JOIN notecard n ON s.note_id = n.id
-            where n.campaign_id = %s
+            WHERE n.campaign_id = %s
         """, (session['campaign_id'],))
         spells = cursor.fetchall()
-        cursor.close()
-        # Format spells for dropdown
         spells = [{'id': spell[0], 'name': spell[1]} for spell in spells]
 
         extra['spells'] = [spell for spell in spells if spell['id'] in associated_spell_ids]
@@ -318,13 +340,20 @@ def edit_notecard(notecard_id):
                 intelligence = request.form.get('intelligence')
                 wisdom = request.form.get('wisdom')
                 charisma = request.form.get('charisma')
-
+                hp = request.form.get('hp')
+                speed = request.form.get('speed')
+                ac = request.form.get('ac')
                 if race and level:
                     cursor.execute("""
                         UPDATE entity
-                        SET race = %s, level = %s, class = %s, strength = %s, dexterity = %s, constitution = %s, intelligence = %s, wisdom = %s, charisma = %s
+                        SET race = %s, level = %s, class = %s,
+                            strength = %s, dexterity = %s, constitution = %s,
+                            intelligence = %s, wisdom = %s, charisma = %s,
+                            hp = %s, speed = %s, ac = %s
                         WHERE note_id = %s
-                    """, (race, level, char_class, strength, dexterity, constitution, intelligence, wisdom, charisma, notecard_id))
+                    """, (race, level, char_class, strength, dexterity, constitution,
+                        intelligence, wisdom, charisma, hp, speed, ac, notecard_id))
+
                     # Get the ID of the last inserted entity
                     cursor.execute("SELECT id FROM entity WHERE note_id = %s", (notecard_id,))
                     entity_id = cursor.fetchone()[0]
@@ -370,6 +399,7 @@ def edit_notecard(notecard_id):
                     """, (location_type, notecard_id))
 
 
+
             mysql.connection.commit()
             cursor.close()
 
@@ -381,7 +411,27 @@ def edit_notecard(notecard_id):
 
         return redirect('/notecards')
 
-    return render_template('editnotecard.html', card=card, extra=extra, spells=spells)
+    cursor = mysql.connection.cursor()
+    cursor.execute("""
+        SELECT t.name
+        FROM tag t
+        JOIN notecard_tag nt ON t.id = nt.tag_id
+        WHERE nt.note_id = %s
+    """, (notecard_id,))
+    tags = [row[0] for row in cursor.fetchall()]
+    cursor.close()
+
+
+    return render_template(
+        'editnotecard.html',
+        card=card,
+        extra=extra,
+        spells=spells,
+        all_spells=all_spells,
+        known_spells=known_spells,
+        tags=tags
+    )
+
 
 
 
@@ -405,10 +455,12 @@ def view_notecard(notecard_id):
     # Load Extra Fields
     extra = {}
     cursor.execute("""
-        SELECT race, level, class, strength, dexterity, constitution, intelligence, wisdom, charisma
-        FROM entity WHERE note_id = %s
+        SELECT race, level, class, strength, dexterity, constitution, intelligence,
+           wisdom, charisma, hp, speed, ac
+    FROM entity WHERE note_id = %s
     """, (notecard_id,))
     entity = cursor.fetchone()
+
     if entity:
         extra.update({
             'Race': entity[0],
@@ -420,7 +472,11 @@ def view_notecard(notecard_id):
             'Intelligence': entity[6],
             'Wisdom': entity[7],
             'Charisma': entity[8],
+            'HP': entity[9],
+            'Speed': entity[10],
+            'AC': entity[11],
         })
+
 
     cursor.execute("""
         SELECT level, school, spell_text, damage_type, damage, save
@@ -834,12 +890,19 @@ def new_notecard():
                 intelligence = request.form.get('intelligence')
                 wisdom = request.form.get('wisdom')
                 charisma = request.form.get('charisma')
+                hp = request.form.get('hp')
+                speed = request.form.get('speed')
+                ac = request.form.get('ac')
 
                 if race and level:
                     cursor.execute("""
-                        INSERT INTO entity (note_id, race, level, class, strength, dexterity, constitution, intelligence, wisdom, charisma)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (note_id, race, level, char_class, strength, dexterity, constitution, intelligence, wisdom, charisma))
+                        INSERT INTO entity (note_id, race, level, class,
+                                            strength, dexterity, constitution,
+                                            intelligence, wisdom, charisma,
+                                            hp, speed, ac)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (note_id, race, level, char_class, strength, dexterity,
+                        constitution, intelligence, wisdom, charisma, hp, speed, ac))
                 
                         # Get the list of selected spell IDs
                 spell_ids = request.form.getlist('spell_ids[]')
